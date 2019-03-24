@@ -1,5 +1,6 @@
 const Client = require('hangupsjs');
 const Q = require('q');
+const Store = require('data-store');
 const winston = require('winston');
 require('winston-daily-rotate-file');
 const { format } = require('logform');
@@ -44,6 +45,9 @@ process.on('uncaughtException', function(err) {
   throw err;
 });
 
+// Setup memory store
+const store = new Store({ path: './history.json' });
+
 // callback to get promise for creds using stdin. this in turn
 // means the user must fire up their browser and get the
 // requested token.
@@ -70,7 +74,8 @@ const SELF = (() => {
   };
 })();
 
-const reply_message = "I am currently on vacation.";
+const message_builder = new Client.MessageBuilder();
+const reply_message = message_builder.text("I am currently on vacation.").toSegments();
 
 // set more verbose logging ('debug')
 client.loglevel('info');
@@ -81,20 +86,36 @@ client.on('chat_message', function(event) {
   // Ignore messages from bot
   if (event.sender_id.chat_id == SELF.getChatId()) return;
 
-  const conversation_id = event.conversation_id.id;
-  const message = event.chat_message.message_content.segment.filter(segment => {
-    return segment.type == "TEXT";
-  }).map(segment => {
-    return segment.text;
-  }).join("\n");
+  Promise.all([
+    /* Conversation info */
+    client.getconversation(event.conversation_id.id, Date.now(), 1, true)
+    .then(conversation => {
+      return {
+        'id': conversation.conversation_state.conversation_id.id,
+        'is_group_chat': conversation.conversation_state.conversation.type == "GROUP"
+      };
+    }),
+    /* Sender info */
+    client.getentitybyid([event.sender_id.chat_id]).then(entity => {  
+      return {
+        'name': entity.entities[0].properties.display_name
+      };
+    }),
+    /* Message string */
+    messageSegmentsToString(event.chat_message.message_content.segment),
+  ]).then(info => {
+    var conversation = info[0];
+    var sender = info[1];
+    var message = info[2];
+    
+    logger.info(`chat_message ${conversation.id} ${sender.name}: ${message}`);
 
-  client.getentitybyid([event.sender_id.chat_id]).then(entity => {
-    const sender = entity.entities[0].properties.display_name;
+    // Only reply once per day
+    if (store.has(conversation.id) && new Date(store.get(conversation.id)).toDateString() == new Date().toDateString()) return;
 
-    logger.info(`chat_message ${conversation_id} ${sender}: ${message}`);
-
-    return sendMessage(conversation_id, reply_message);
-  })
+    store.set(conversation.id, new Date().toJSON());
+    return sendMessage(conversation.id, reply_message);
+  });
 
 });
 
@@ -103,7 +124,7 @@ client.on('connected', event => {
   .then(self => {
     SELF.setChatId(self.self_entity.id.chat_id);
 
-    const display_name = self.self_entity.properties.display_name; client.di
+    const display_name = self.self_entity.properties.display_name;
     const email = self.self_entity.properties.email;
 
     logger.info(`connected Logged in as ${display_name} <${email}>`);
@@ -129,12 +150,16 @@ client.on('connect_failed', function() {
 // start connection
 reconnect();
 
+function messageSegmentsToString(segments) {
+  return segments.filter(segment => {
+    return segment.type ? segment.type == "TEXT" : segment[0] == 0;
+  }).map(segment => {
+    return segment.text ? segment.text : segment[1];
+  }).join("\n");
+}
 
-function sendMessage(conversation_id, message) {
-    logger.info(`sendMessage ${conversation_id} Sending message: ${message}`);
-
-    const message_builder = new Client.MessageBuilder();
-    const message_segments = message_builder.text(message).toSegments();
+function sendMessage(conversation_id, message_segments) {
+    logger.info(`sendMessage ${conversation_id} Sending message: ${messageSegmentsToString(message_segments)}`);
 
     return client.sendchatmessage(conversation_id, message_segments);
 }
