@@ -1,4 +1,5 @@
 const Client = require('hangupsjs');
+const Q = require('q');
 const log = require('bog');
 
 // callback to get promise for creds using stdin. this in turn
@@ -67,7 +68,24 @@ client.on('connected', event => {
   });
 });
 
-client.connect(creds).done();
+var reconnect = function() {
+  client.connect(creds).then(function() {
+      // we are now connected. a `connected`
+      // event was emitted.
+  });
+};
+
+// whenever it fails, we try again
+client.on('connect_failed', function() {
+  Q.Promise(function(rs) {
+      // backoff for 3 seconds
+      setTimeout(rs,3000);
+  }).then(reconnect);
+});
+
+// start connection
+reconnect();
+
 
 function sendMessage(conversation_id, message) {
     log.info('sendMessage', conversation_id, `Sending message: ${message}`);
