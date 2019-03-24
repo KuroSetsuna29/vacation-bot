@@ -1,6 +1,25 @@
 const Client = require('hangupsjs');
 const Q = require('q');
-const log = require('bog');
+const winston = require('winston');
+require('winston-daily-rotate-file');
+const { format } = require('logform');
+
+// Setup logger
+var logger = winston.createLogger({
+  format: format.combine(
+    format.timestamp({ format: 'YYYY-MM-DD H:mm:ss' }),
+    format.printf(info => `${info.timestamp} ${info.level.toUpperCase()} ${info.message}`)
+  ),
+  transports: [
+    new (winston.transports.DailyRotateFile)({
+      dirname: '/logs/vacation-bot/',
+      filename: '%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '14d'
+    }),
+    new winston.transports.Console()
+  ]
+});
 
 // callback to get promise for creds using stdin. this in turn
 // means the user must fire up their browser and get the
@@ -49,7 +68,7 @@ client.on('chat_message', function(event) {
   client.getentitybyid([event.sender_id.chat_id]).then(entity => {
     const sender = entity.entities[0].properties.display_name;
 
-    log.info('chat_message', conversation_id, `${sender}: ${message}`);
+    logger.info(`chat_message ${conversation_id} ${sender}: ${message}`);
 
     return sendMessage(conversation_id, reply_message);
   })
@@ -64,7 +83,7 @@ client.on('connected', event => {
     const display_name = self.self_entity.properties.display_name; client.di
     const email = self.self_entity.properties.email;
 
-    log.info('connected', `Logged in as ${display_name} <${email}>`);
+    logger.info(`connected Logged in as ${display_name} <${email}>`);
   });
 });
 
@@ -79,6 +98,7 @@ var reconnect = function() {
 client.on('connect_failed', function() {
   Q.Promise(function(rs) {
       // backoff for 3 seconds
+      logger.info(`connect_failed Connection failed, retrying in 3 seconds...`);
       setTimeout(rs,3000);
   }).then(reconnect);
 });
@@ -88,7 +108,7 @@ reconnect();
 
 
 function sendMessage(conversation_id, message) {
-    log.info('sendMessage', conversation_id, `Sending message: ${message}`);
+    logger.info(`sendMessage ${conversation_id} Sending message: ${message}`);
 
     const message_builder = new Client.MessageBuilder();
     const message_segments = message_builder.text(message).toSegments();
