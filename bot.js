@@ -4,11 +4,21 @@ const winston = require('winston');
 require('winston-daily-rotate-file');
 const { format } = require('logform');
 
-// Setup logger
-var logger = winston.createLogger({
+// Setup logging
+const logger = winston.createLogger({
   format: format.combine(
     format.timestamp({ format: 'YYYY-MM-DD H:mm:ss' }),
     format.printf(info => `${info.timestamp} ${info.level.toUpperCase()} ${info.message}`)
+  ),
+  transports: [
+    new winston.transports.Console()
+  ]
+});
+
+const redirect_logger = winston.createLogger({
+  format: format.combine(
+    format.timestamp({ format: 'YYYY-MM-DD H:mm:ss' }),
+    format.printf(info => info.message[0].trim())
   ),
   transports: [
     new (winston.transports.DailyRotateFile)({
@@ -16,9 +26,22 @@ var logger = winston.createLogger({
       filename: '%DATE%.log',
       datePattern: 'YYYY-MM-DD',
       maxFiles: '14d'
-    }),
-    new winston.transports.Console()
+    })
   ]
+});
+
+const stdo = process.stdout.write;
+
+function stdo_write() {
+  stdo.apply(process.stdout, arguments);
+  redirect_logger.info(arguments);
+}
+
+process.stdout.write = stdo_write;
+
+process.on('uncaughtException', function(err) {
+  logger.error((err && err.stack) ? err.stack : err);
+  throw err;
 });
 
 // callback to get promise for creds using stdin. this in turn
@@ -49,7 +72,7 @@ const SELF = (() => {
 
 const reply_message = "I am currently on vacation.";
 
-// set more verbose logging
+// set more verbose logging ('debug')
 client.loglevel('info');
 
 // receive chat message events
