@@ -151,8 +151,10 @@ client.on('connect_failed', function() {
 reconnect();
 
 function messageSegmentsToString(segments) {
+  if (!segments) return '';
+
   return segments.filter(segment => {
-    return segment.type ? segment.type == "TEXT" : segment[0] == 0;
+    return segment.type ? segment.type == "TEXT" : (segment.length >= 2 && segment[0] == 0);
   }).map(segment => {
     return segment.text ? segment.text : segment[1];
   }).join("\n");
